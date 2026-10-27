@@ -692,6 +692,12 @@ fn validate_account_path(name: &str, field: &str, path: &std::path::Path) -> Res
         bail!("bootstrap user '{name}' {field} must be an absolute path");
     }
     if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!("bootstrap user '{name}' {field} must not contain '..' path components");
+    }
+    if path
         .to_string_lossy()
         .chars()
         .any(|character| character == ':' || character == '\n' || character == '\r')
@@ -1035,5 +1041,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(request.groups, Some(BTreeSet::from(["sudo".to_string()])));
+    }
+    #[test]
+    fn validates_account_paths_rejects_parent_dir() {
+        assert!(validate_account_path("user", "home", std::path::Path::new("/home/user")).is_ok());
+        assert!(validate_account_path("user", "shell", std::path::Path::new("/bin/bash")).is_ok());
+        assert!(
+            validate_account_path("user", "home", std::path::Path::new("relative/path")).is_err()
+        );
+        assert!(
+            validate_account_path(
+                "user",
+                "home",
+                std::path::Path::new("/home/victim/../../etc")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_account_path("user", "shell", std::path::Path::new("/bin/../opt/shell"))
+                .is_err()
+        );
     }
 }
