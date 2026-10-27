@@ -536,12 +536,14 @@ fn env_script_all_bin_files(install_path: &Path) -> eyre::Result<bool> {
                 install_libexec_path.display()
             )
         })?;
+        let gem_exec_path = shell_words::quote(gem_exec_path);
+        let gem_home = shell_words::quote(gem_home);
         file::write(
             &exec_path,
             formatdoc!(
                 r#"
                 #!/usr/bin/env bash
-                GEM_HOME="{gem_home}" exec {gem_exec_path} "$@"
+                GEM_HOME={gem_home} exec {gem_exec_path} "$@"
                 "#,
                 gem_home = gem_home,
                 gem_exec_path = gem_exec_path,
@@ -1279,5 +1281,28 @@ mod tests {
         assert_eq!(extract_minor_version("2.7.8"), Some("2.7".to_string()));
         assert_eq!(extract_minor_version("3"), None);
         assert_eq!(extract_minor_version("latest"), None);
+    }
+
+    #[test]
+    fn test_env_script_all_bin_files_shell_quoting() {
+        let temp = tempfile::tempdir().unwrap();
+        let libexec_bin = temp.path().join("libexec/bin");
+        file::create_dir_all(&libexec_bin).unwrap();
+
+        let malicious_name = "tool;echo injected";
+        let exec_bin = libexec_bin.join(malicious_name);
+        file::write(&exec_bin, "#!/bin/sh\nexit 0\n").unwrap();
+        file::make_executable(&exec_bin).unwrap();
+
+        env_script_all_bin_files(temp.path()).unwrap();
+
+        let wrapper_path = temp.path().join("bin").join(malicious_name);
+        let wrapper_content = file::read_to_string(&wrapper_path).unwrap();
+
+        let quoted_exec = shell_words::quote(exec_bin.to_str().unwrap());
+        assert!(
+            wrapper_content.contains(&format!("exec {quoted_exec} \"$@\"")),
+            "Expected wrapper to contain safely quoted exec path, got:\n{wrapper_content}"
+        );
     }
 }
